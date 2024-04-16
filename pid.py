@@ -32,13 +32,16 @@ class PID:
         deltaError = error - self.prev_err
         # proportional term
         self.cP = error
+        #print(self.cP)
         # integral term
         self.cI += error * deltaTime
+        #print(f"cI: {self.cI}")
         # derivative term and prevent divide by zero
         self.cD = (deltaError / deltaTime) if deltaTime > 0 else 0
         # save previous time and error for the next update
         self.prev_tm = self.curr_tm
         self.prev_err = error
+        #print(error)
         # sum the terms and return
         return sum([
             self.kP * self.cP,

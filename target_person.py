@@ -8,7 +8,7 @@ import sys
 import cv2
 import socket
 
-servoRange = (-90, 90)
+
 def signal_handler(sig, frame):
     # print a status message
     print("[INFO] You pressed `ctrl + c`! Exiting...")
@@ -16,7 +16,7 @@ def signal_handler(sig, frame):
     # exit
     sys.exit()
     
-def obj_center(objX, objY, centerX, centerY):
+def obj_center(objX, objY, centerX, centerY, pull_trigger):
     # signal trap to handle keyboard interrupt
     signal.signal(signal.SIGINT, signal_handler)
 
@@ -25,8 +25,8 @@ def obj_center(objX, objY, centerX, centerY):
     
     # initialize the object center finder
     obj = Calc_Center()
+    pull_trigger.value = 0
 
-    
     # loop indefinitely
     while True:
         # grab the frame from the threaded video stream
@@ -36,18 +36,23 @@ def obj_center(objX, objY, centerX, centerY):
         (H, W) = fullSizeBaseImage.shape[:2]
         centerX.value = W // 2
         centerY.value = H // 2
+        if objX.value == 0 and objY.value == 0:
+            objX.value = centerX.value
+            objY.value = centerY.value
         
         # find the object's location
         objectLoc = obj.update(fullSizeBaseImage, (centerX.value, centerY.value))
-        ((temp_x, temp_y), rect) = objectLoc
+        ((objX.value, objY.value), rect) = objectLoc
 
         # extract the bounding box and draw it
         if rect is not None:
-            objX.value = int(temp_x)
-            objY.value = int(temp_y)
-
             (x, y, w, h) = rect
             cv2.rectangle(fullSizeBaseImage, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+        if objX.value - centerX.value < W * 0.05 and objY.value - centerY.value < H * 0.05 and rect is not None:
+                pull_trigger.value = 1
+        else:
+                pull_trigger.value = 0
         # display the frame to the screen
         
         cv2.imshow("Body Tracking", fullSizeBaseImage)
@@ -61,14 +66,11 @@ def pid_process (output, p, i, d, obj_coord, center_coord):
     p = PID(p.value, i.value, d.value)
     
     while True:
-        if (obj_coord.value != 0):
-            error = center_coord.value - obj_coord.value
-            output.value = int(p.update(error))
-        
-def in_range (angle, start, end):
-    return (start <= angle) and (angle <= end)
+        error = center_coord.value - obj_coord.value
+        output.value = int(p.update(error))
 
-def send_servo_data (pan, tlt):
+
+def send_servo_data (pan, tlt, pull_trigger):
     signal.signal(signal.SIGINT, signal_handler)
 
     server_ip = '192.168.4.204'
@@ -78,14 +80,12 @@ def send_servo_data (pan, tlt):
     client_socket.connect((server_ip, port))
 
     while True:
-        time.sleep(0.2)
-        # the pan and tilt angles are reversed
+        time.sleep(0.1)
         panAngle = pan.value
         tltAngle = tlt.value
         
-        if in_range(panAngle, servoRange[0], servoRange[1]) and in_range(tltAngle, servoRange[0], servoRange[1]):
-            angles = f'{panAngle} {tltAngle}'
-            client_socket.send(bytes(angles, "utf-8"))
+        angles = f'{panAngle} {tltAngle} {pull_trigger.value}'
+        client_socket.send(bytes(angles, "utf-8"))
 
 
 if __name__ == '__main__':
@@ -107,23 +107,24 @@ if __name__ == '__main__':
         tlt = manager.Value("i", 0)
         
         # set PID values for panning, these are the constants
-        panP = manager.Value("f", 0.07)
-        panI = manager.Value("f", 0.008)
-        panD = manager.Value("f", 0.00006)
+        panP = manager.Value("f", 0.015)
+        panI = manager.Value("f", 0.01)
+        panD = manager.Value("f", 0.001)
         
         # set PID values for tilting
-        tiltP = manager.Value("f", 0.06)
-        tiltI = manager.Value("f", 0.007)
-        tiltD = manager.Value("f", 0.00005)
+        tiltP = manager.Value("f", 0.0125)
+        tiltI = manager.Value("f", 0.009)
+        tiltD = manager.Value("f", 0.001)
         
+        pull_trigger = manager.Value("i", 0)
 
         processObjectCenter = Process(target=obj_center,
-            args=(objX, objY, centerX, centerY))
+            args=(objX, objY, centerX, centerY, pull_trigger))
         processPanning = Process(target=pid_process,
             args=(pan, panP, panI, panD, objX, centerX))
         processTilting = Process(target=pid_process,
             args=(tlt, tiltP, tiltI, tiltD, objY, centerY))
-        processSetServos = Process(target=send_servo_data, args=(pan, tlt))
+        processSetServos = Process(target=send_servo_data, args=(pan, tlt, pull_trigger))
         # start all 4 processes
         processObjectCenter.start()
         processPanning.start()

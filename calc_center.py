@@ -3,7 +3,7 @@ import cv2
 # Object holds the position of the center of the face/body in frame
 class Calc_Center:
     def __init__ (self):
-        self.classifier = cv2.CascadeClassifier('haarcascade_frontalface_default.xml')
+        self.classifier = cv2.CascadeClassifier('haarcascade_upperbody.xml')
         
     def update (self, frame, frame_center):
 
